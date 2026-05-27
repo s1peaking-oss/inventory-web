@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>재고테이블 자동 가공</title>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #161922;
+    --surface-2: #1d2230;
+    --border: #2a2f3e;
+    --text: #e8eaef;
+    --text-dim: #8b91a3;
+    --accent: #ffc94d;
+    --accent-dim: #b8902f;
+    --pink: #ffc7ce;
+    --blue: #305496;
+    --success: #4ade80;
+    --error: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans KR', sans-serif;
+    font-weight: 400;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(255, 201, 77, 0.06), transparent 40%),
+      radial-gradient(circle at 85% 90%, rgba(48, 84, 150, 0.08), transparent 45%);
+    background-attachment: fixed;
+  }
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 60px 32px 80px;
+  }
+  header { margin-bottom: 48px; }
+  .badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    background: rgba(255, 201, 77, 0.08);
+    border: 1px solid rgba(255, 201, 77, 0.25);
+    padding: 5px 12px;
+    border-radius: 2px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+  }
+  h1 {
+    font-family: 'Gowun Dodum', serif;
+    font-size: 44px;
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 14px;
+  }
+  h1 .accent { color: var(--accent); font-style: italic; }
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1.6;
+    max-width: 560px;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 32px;
+    margin-bottom: 20px;
+  }
+  .panel-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 18px;
+  }
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 6px;
+    padding: 48px 24px;
+    text-align: center;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.01);
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(255, 201, 77, 0.04);
+  }
+  .drop-zone.disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .drop-icon {
+    font-size: 32px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+  .drop-text { color: var(--text); font-size: 15px; margin-bottom: 6px; }
+  .drop-hint { color: var(--text-dim); font-size: 13px; }
+  #fileInput { display: none; }
+  .file-info {
+    margin-top: 16px;
+    padding: 14px 18px;
+    background: var(--surface-2);
+    border-radius: 4px;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+  }
+  .file-info.show { display: flex; }
+  .file-info .name { color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+  .file-info .size { color: var(--text-dim); font-size: 12px; }
+  button.primary {
+    margin-top: 22px;
+    width: 100%;
+    background: var(--accent);
+    color: #1a1308;
+    border: none;
+    padding: 16px 24px;
+    font-family: 'IBM Plex Sans KR', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  button.primary:hover:not(:disabled) {
+    background: #ffd76b;
+    transform: translateY(-1px);
+  }
+  button.primary:disabled {
+    background: var(--surface-2);
+    color: var(--text-dim);
+    cursor: not-allowed;
+  }
+  .status {
+    margin-top: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    padding: 18px 22px;
+    border-radius: 4px;
+    border-left: 2px solid var(--border);
+    min-height: 60px;
+    max-height: 240px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+  .status.ready { border-left-color: var(--accent); }
+  .status.working { border-left-color: var(--blue); }
+  .status.done { border-left-color: var(--success); }
+  .status.error { border-left-color: var(--error); color: #fca5a5; }
+  .status .line { display: block; }
+  .status .line.success { color: var(--success); }
+  .status .line.warn { color: var(--accent); }
+  .download-area {
+    margin-top: 24px;
+    display: none;
+  }
+  .download-area.show { display: block; }
+  .download-btn {
+    display: block;
+    background: var(--success);
+    color: #0a2417;
+    text-decoration: none;
+    padding: 16px 24px;
+    border-radius: 4px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 15px;
+    transition: all 0.15s ease;
+  }
+  .download-btn:hover {
+    background: #6ee7a3;
+    transform: translateY(-1px);
+  }
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .info-cell {
+    background: var(--surface-2);
+    padding: 14px 16px;
+    border-radius: 4px;
+  }
+  .info-cell .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .info-cell .value {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  footer {
+    margin-top: 40px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+  footer .pulse {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    margin-right: 6px;
+    vertical-align: middle;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="badge">Browser-Only · No Upload</div>
+    <h1>재고테이블 <span class="accent">자동 가공</span></h1>
+    <p class="subtitle">
+      엑셀 파일을 떨어뜨리면 4개 시트로 정리된 결과물이 만들어집니다.
+      모든 처리는 브라우저 안에서만 이루어지며 파일은 어디로도 전송되지 않습니다.
+    </p>
+  </header>
+
+  <div class="panel">
+    <div class="panel-title">[1] 파일 선택</div>
+    <div id="dropZone" class="drop-zone disabled">
+      <div class="drop-icon">⬇</div>
+      <div class="drop-text">파일을 끌어다 놓거나 클릭하여 선택</div>
+      <div class="drop-hint">.xls 또는 .xlsx · 한 번에 한 개</div>
+    </div>
+    <input type="file" id="fileInput" accept=".xls,.xlsx">
+    <div id="fileInfo" class="file-info">
+      <span class="name" id="fileName"></span>
+      <span class="size" id="fileSize"></span>
+    </div>
+    <button id="runBtn" class="primary" disabled>준비 중...</button>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">[2] 진행 상황</div>
+    <div id="status" class="status ready"><span class="line">Pyodide 초기화 중... (최초 1회만 약 20~40초)</span></div>
+    <div id="resultInfo" class="info-grid" style="display:none;"></div>
+    <div id="downloadArea" class="download-area">
+      <a id="downloadLink" class="download-btn" href="#" download>가공완료 파일 다운로드</a>
+    </div>
+  </div>
+
+  <footer><span class="pulse"></span>powered by pyodide · pandas · openpyxl</footer>
+</div>
+
+<script>
+let pyodide = null;
+let inputFile = null;
+let outputBlob = null;
+let outputFilename = null;
+
+const $ = (id) => document.getElementById(id);
+const status = $('status');
+const dropZone = $('dropZone');
+const fileInput = $('fileInput');
+const runBtn = $('runBtn');
+
+function setStatus(text, cls) {
+  status.className = 'status ' + (cls || '');
+  status.innerHTML = '';
+  appendStatus(text);
+}
+function appendStatus(text, lineCls) {
+  const span = document.createElement('span');
+  span.className = 'line' + (lineCls ? ' ' + lineCls : '');
+  span.textContent = text;
+  status.appendChild(span);
+  status.scrollTop = status.scrollHeight;
+}
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+// === Pyodide 초기화 ===
+async function initPyodide() {
+  try {
+    setStatus('Pyodide 런타임 로드 중...', 'working');
+    pyodide = await loadPyodide({
+      indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/'
+    });
+
+    appendStatus('필요 패키지 설치 중: pandas, openpyxl, lxml, html5lib, beautifulsoup4...');
+    await pyodide.loadPackage(['pandas', 'openpyxl', 'lxml', 'html5lib', 'beautifulsoup4', 'micropip']);
+
+    appendStatus('Python 스크립트 로딩...');
+    pyodide.runPython(PYTHON_CODE);
+
+    appendStatus('준비 완료. 파일을 선택하세요.', 'success');
+    status.className = 'status ready';
+    dropZone.classList.remove('disabled');
+    runBtn.textContent = '파일을 먼저 선택하세요';
+  } catch (e) {
+    setStatus('초기화 실패: ' + e.message, 'error');
+  }
+}
+
+// === 파일 선택 핸들러 ===
+dropZone.addEventListener('click', () => {
+  if (!dropZone.classList.contains('disabled')) fileInput.click();
+});
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files.length > 0) handleFile(e.target.files[0]);
+});
+['dragenter', 'dragover'].forEach(ev => {
+  dropZone.addEventListener(ev, (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!dropZone.classList.contains('disabled')) dropZone.classList.add('dragover');
+  });
+});
+['dragleave', 'drop'].forEach(ev => {
+  dropZone.addEventListener(ev, (e) => {
+    e.preventDefault(); e.stopPropagation();
+    dropZone.classList.remove('dragover');
+  });
+});
+dropZone.addEventListener('drop', (e) => {
+  if (dropZone.classList.contains('disabled')) return;
+  const files = e.dataTransfer.files;
+  if (files.length > 0) handleFile(files[0]);
+});
+
+function handleFile(file) {
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.xls') && !name.endsWith('.xlsx')) {
+    setStatus('지원하지 않는 형식입니다. .xls 또는 .xlsx 파일을 선택하세요.', 'error');
+    return;
+  }
+  inputFile = file;
+  $('fileName').textContent = file.name;
+  $('fileSize').textContent = fmtSize(file.size);
+  $('fileInfo').classList.add('show');
+  runBtn.disabled = false;
+  runBtn.textContent = '가공 시작';
+  $('downloadArea').classList.remove('show');
+  $('resultInfo').style.display = 'none';
+}
+
+// === 실행 ===
+runBtn.addEventListener('click', async () => {
+  if (!inputFile || !pyodide) return;
+
+  runBtn.disabled = true;
+  runBtn.innerHTML = '<span class="spinner"></span>처리 중...';
+  $('downloadArea').classList.remove('show');
+  $('resultInfo').style.display = 'none';
+  setStatus('파일 읽는 중...', 'working');
+
+  try {
+    const buf = await inputFile.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    pyodide.FS.writeFile('/input_file', bytes);
+
+    appendStatus('Python 처리 시작...');
+    // 진행 메시지를 받기 위한 콜백
+    pyodide.globals.set('js_log', (msg) => appendStatus(msg));
+
+    const resultJson = await pyodide.runPythonAsync(`
+import json
+result = run_processing('/input_file', ${JSON.stringify(inputFile.name)}, js_log)
+json.dumps(result)
+`);
+    const result = JSON.parse(resultJson);
+
+    if (result.error) {
+      setStatus('오류: ' + result.error, 'error');
+      runBtn.disabled = false;
+      runBtn.textContent = '다시 시도';
+      return;
+    }
+
+    // 결과 파일 가져오기
+    const outBytes = pyodide.FS.readFile('/output_file');
+    outputBlob = new Blob([outBytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    outputFilename = result.output_name;
+
+    const url = URL.createObjectURL(outputBlob);
+    const link = $('downloadLink');
+    link.href = url;
+    link.download = outputFilename;
+    $('downloadArea').classList.add('show');
+
+    // 통계 표시
+    const grid = $('resultInfo');
+    grid.style.display = 'grid';
+    grid.innerHTML = `
+      <div class="info-cell">
+        <div class="label">총 재고수량</div>
+        <div class="value">${result.total_qty.toLocaleString()}</div>
+      </div>
+      <div class="info-cell">
+        <div class="label">총 금액 (원)</div>
+        <div class="value">${result.total_amount.toLocaleString()}</div>
+      </div>
+      <div class="info-cell">
+        <div class="label">매입재고 행</div>
+        <div class="value">${result.buy_rows.toLocaleString()}</div>
+      </div>
+      <div class="info-cell">
+        <div class="label">위탁재고 행</div>
+        <div class="value">${result.cons_rows.toLocaleString()}</div>
+      </div>
+    `;
+
+    appendStatus('완료! 아래 버튼으로 다운로드하세요.', 'success');
+    status.className = 'status done';
+    runBtn.disabled = false;
+    runBtn.textContent = '다른 파일로 다시 실행';
+  } catch (e) {
+    console.error(e);
+    setStatus('처리 중 오류 발생:\n' + e.message, 'error');
+    runBtn.disabled = false;
+    runBtn.textContent = '다시 시도';
+  }
+});
+
+// === Python 코드 (process_inventory.py를 함수화) ===
+const PYTHON_CODE = `
+import math
+import os
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+from io import BytesIO
+
+THIN = Side(border_style="thin", color="BFBFBF")
+BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+HEADER_FILL = PatternFill("solid", start_color="305496", end_color="305496")
+HEADER_FONT = Font(name="맑은 고딕", bold=True, color="FFFFFF", size=10)
+SUMMARY_VALUE_FILL = PatternFill("solid", start_color="FFE699", end_color="FFE699")
+SUMMARY_LABEL_FONT = Font(name="맑은 고딕", bold=True, size=11)
+SUMMARY_VALUE_FONT = Font(name="맑은 고딕", bold=True, size=11)
+YANGWOO_FILL = PatternFill("solid", start_color="FFC7CE", end_color="FFC7CE")
+BODY_FONT = Font(name="맑은 고딕", size=10)
+CENTER = Alignment(horizontal="center", vertical="center")
+RIGHT = Alignment(horizontal="right", vertical="center")
+LEFT = Alignment(horizontal="left", vertical="center")
+
+
+def read_source(path):
+    try:
+        tables = pd.read_html(path)
+        df = max(tables, key=lambda t: t.shape[0] * t.shape[1])
+        df.columns = df.iloc[0]
+        df = df.drop(df.index[0]).reset_index(drop=True)
+    except Exception:
+        df = pd.read_excel(path)
+    return df
+
+
+def prepare_data(df):
+    if '발송형태' in df.columns:
+        df = df[df['발송형태'].astype(str) != '외주발송'].copy()
+    if '규격' in df.columns:
+        df = df[df['규격'].astype(str) != '상품권'].copy()
+    df['재고수량'] = pd.to_numeric(df['재고수량'], errors='coerce').fillna(0).astype(int)
+    df['단가'] = pd.to_numeric(df['단가'], errors='coerce').fillna(0)
+    df['금액'] = (df['재고수량'] * df['단가']).apply(lambda x: int(math.ceil(x)))
+    def to_num(v):
+        try:
+            s = str(v).strip()
+            if s == '' or s.lower() == 'nan':
+                return v
+            return int(float(s))
+        except (ValueError, TypeError):
+            return v
+    df['바코드'] = df['바코드'].apply(to_num)
+    return df.reset_index(drop=True)
+
+
+def reorder_columns(df):
+    cols = list(df.columns)
+    if '금액' in cols: cols.remove('금액')
+    if '단가' in cols:
+        idx = cols.index('단가') + 1
+        cols.insert(idx, '금액')
+    else:
+        cols.append('금액')
+    return df[cols]
+
+
+def style_header_row(ws, row, last_col):
+    for c in range(1, last_col + 1):
+        cell = ws.cell(row=row, column=c)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER
+        cell.border = BORDER
+
+
+def apply_borders_range(ws, row_start, row_end, col_start, col_end):
+    for r in range(row_start, row_end + 1):
+        for c in range(col_start, col_end + 1):
+            ws.cell(row=r, column=c).border = BORDER
+
+
+def build_barcode_sheet(wb, df):
+    ws = wb.create_sheet("바코드")
+    sub = df[['바코드', '재고수량']].sort_values('재고수량', ascending=False).reset_index(drop=True)
+    ws['A1'] = '바코드'; ws['B1'] = '재고수량'
+    style_header_row(ws, 1, 2)
+    for r, (bc, qty) in enumerate(sub.itertuples(index=False, name=None), start=2):
+        a = ws.cell(row=r, column=1, value=bc)
+        b = ws.cell(row=r, column=2, value=int(qty))
+        a.number_format = "0"; b.number_format = "#,##0"
+        a.font = BODY_FONT; b.font = BODY_FONT
+        a.alignment = CENTER; b.alignment = RIGHT
+    last_row = ws.max_row
+    apply_borders_range(ws, 1, last_row, 1, 2)
+    ws.column_dimensions['A'].width = 22
+    ws.column_dimensions['B'].width = 14
+    ws.auto_filter.ref = f"A1:B{last_row}"
+    ws.freeze_panes = "A2"
+
+
+def build_full_sheet(wb, sheet_name, df_filtered):
+    ws = wb.create_sheet(sheet_name)
+    df_sorted = df_filtered.sort_values('재고수량', ascending=False).reset_index(drop=True)
+    df_sorted = reorder_columns(df_sorted)
+    header_row = 3
+    data_start = 4
+    data_end = data_start + len(df_sorted) - 1
+    cols = list(df_sorted.columns)
+    last_col = len(cols)
+    for c, name in enumerate(cols, start=1):
+        ws.cell(row=header_row, column=c, value=str(name))
+    style_header_row(ws, header_row, last_col)
+    for r_offset, row in enumerate(df_sorted.itertuples(index=False, name=None)):
+        r = data_start + r_offset
+        for c, val in enumerate(row, start=1):
+            cell = ws.cell(row=r, column=c, value=val)
+            cell.font = BODY_FONT
+    stock_col = cols.index('재고수량') + 1
+    price_col = cols.index('단가') + 1
+    amount_col = cols.index('금액') + 1
+    bc_col = cols.index('바코드') + 1
+    stock_letter = get_column_letter(stock_col)
+    amount_letter = get_column_letter(amount_col)
+    ws['D1'] = '재고 합계'; ws['D1'].font = SUMMARY_LABEL_FONT; ws['D1'].alignment = RIGHT
+    ws['E1'] = f"=SUM({stock_letter}{data_start}:{stock_letter}{data_end})"
+    ws['E1'].font = SUMMARY_VALUE_FONT; ws['E1'].fill = SUMMARY_VALUE_FILL
+    ws['E1'].number_format = "#,##0"; ws['E1'].alignment = RIGHT
+    ws['G1'] = '금액 합계'; ws['G1'].font = SUMMARY_LABEL_FONT; ws['G1'].alignment = RIGHT
+    ws['H1'] = f"=SUM({amount_letter}{data_start}:{amount_letter}{data_end})"
+    ws['H1'].font = SUMMARY_VALUE_FONT; ws['H1'].fill = SUMMARY_VALUE_FILL
+    ws['H1'].number_format = "#,##0"; ws['H1'].alignment = RIGHT
+    for r in range(data_start, data_end + 1):
+        ws.cell(row=r, column=stock_col).number_format = "#,##0"
+        ws.cell(row=r, column=stock_col).alignment = RIGHT
+        ws.cell(row=r, column=price_col).number_format = "#,##0"
+        ws.cell(row=r, column=price_col).alignment = RIGHT
+        ws.cell(row=r, column=amount_col).number_format = "#,##0"
+        ws.cell(row=r, column=amount_col).alignment = RIGHT
+        ws.cell(row=r, column=bc_col).number_format = "0"
+        ws.cell(row=r, column=bc_col).alignment = CENTER
+        for c in (1, 2, 3):
+            if c <= last_col:
+                ws.cell(row=r, column=c).alignment = CENTER
+    if '매입거래처' in cols:
+        yangwoo_rows = [data_start + i for i, v in enumerate(df_sorted['매입거래처'].astype(str).str.strip()) if v == '양우글로벌']
+        for r in yangwoo_rows:
+            for c in range(1, last_col + 1):
+                ws.cell(row=r, column=c).fill = YANGWOO_FILL
+    apply_borders_range(ws, header_row, data_end, 1, last_col)
+    apply_borders_range(ws, 1, 1, 4, 8)
+    last_col_letter = get_column_letter(last_col)
+    ws.auto_filter.ref = f"A{header_row}:{last_col_letter}{data_end}"
+    ws.freeze_panes = f"A{data_start}"
+    width_map = {
+        '매칭': 6, '발송형태': 10, '입고형태': 10, '재고위치': 16,
+        '바코드': 16, '구바코드': 14, '매입거래처': 18, '제품명': 18,
+        '규격': 14, '중국어': 14, '모델NO': 14, '모델명': 30,
+        '옵션명': 14, '재고수량': 11, '단가': 10, '금액': 14,
+        '이카운트 품목코드': 16, '등록일': 20, '숨김표시': 8, '상품번호': 12,
+    }
+    for c, name in enumerate(cols, start=1):
+        ws.column_dimensions[get_column_letter(c)].width = width_map.get(name, 12)
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[header_row].height = 22
+
+
+def build_vendor_pivot_sheet(wb, df):
+    ws = wb.create_sheet("거래처별 재고")
+    pivot = df.groupby(['매입거래처', '입고형태'], as_index=False)['금액'].sum()
+    pivot = pivot.sort_values('금액', ascending=False).reset_index(drop=True)
+    header_row = 3
+    data_start = 4
+    data_end = data_start + len(pivot) - 1
+    ws['B1'] = '금액합계'; ws['B1'].font = SUMMARY_LABEL_FONT; ws['B1'].alignment = CENTER
+    ws['C1'] = f"=SUM(C{data_start}:C{data_end})"
+    ws['C1'].font = SUMMARY_VALUE_FONT; ws['C1'].fill = SUMMARY_VALUE_FILL
+    ws['C1'].number_format = "#,##0"; ws['C1'].alignment = RIGHT
+    ws.cell(row=header_row, column=1, value='거래처')
+    ws.cell(row=header_row, column=2, value='입고형태')
+    ws.cell(row=header_row, column=3, value='금액')
+    style_header_row(ws, header_row, 3)
+    for r_offset, (v, t, a) in enumerate(pivot.itertuples(index=False, name=None)):
+        r = data_start + r_offset
+        c1 = ws.cell(row=r, column=1, value=v)
+        c2 = ws.cell(row=r, column=2, value=t)
+        c3 = ws.cell(row=r, column=3, value=int(a))
+        c1.font = BODY_FONT; c2.font = BODY_FONT; c3.font = BODY_FONT
+        c1.alignment = LEFT; c2.alignment = CENTER; c3.alignment = RIGHT
+        c3.number_format = "#,##0"
+    for r_offset, (v, _, _) in enumerate(pivot.itertuples(index=False, name=None)):
+        if str(v).strip() == '양우글로벌':
+            r = data_start + r_offset
+            ws.cell(row=r, column=1).fill = YANGWOO_FILL
+            ws.cell(row=r, column=2).fill = YANGWOO_FILL
+    apply_borders_range(ws, 1, 1, 2, 3)
+    apply_borders_range(ws, header_row, data_end, 1, 3)
+    ws.column_dimensions['A'].width = 20
+    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['C'].width = 18
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[header_row].height = 22
+    ws.auto_filter.ref = f"A{header_row}:C{data_end}"
+    ws.freeze_panes = f"A{data_start}"
+
+
+def run_processing(input_path, original_name, log):
+    try:
+        log(f"[1/5] 파일 읽는 중: {original_name}")
+        df = read_source(input_path)
+        log(f"      원본 행 수: {len(df):,}")
+
+        log("[2/5] 전처리 (외주발송/상품권 제거, 금액 계산)...")
+        df = prepare_data(df)
+        log(f"      가공 후 행 수: {len(df):,}")
+
+        log("[3/5] 워크북 생성...")
+        wb = Workbook()
+        wb.remove(wb.active)
+
+        log("[4/5] 시트 작성: 바코드")
+        build_barcode_sheet(wb, df)
+        log("       시트 작성: 매입재고")
+        df_buy = df[df['입고형태'] == '매입'].copy()
+        build_full_sheet(wb, "매입재고", df_buy)
+        log("       시트 작성: 위탁재고")
+        df_cons = df[df['입고형태'] == '위탁'].copy()
+        build_full_sheet(wb, "위탁재고", df_cons)
+        log("       시트 작성: 거래처별 재고")
+        build_vendor_pivot_sheet(wb, df)
+
+        log("[5/5] 파일 저장 중...")
+        wb.save('/output_file')
+
+        base = os.path.splitext(original_name)[0]
+        output_name = f"{base}_가공완료.xlsx"
+
+        return {
+            "output_name": output_name,
+            "total_qty": int(df['재고수량'].sum()),
+            "total_amount": int(df['금액'].sum()),
+            "buy_rows": int(len(df_buy)),
+            "cons_rows": int(len(df_cons)),
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e) + "\\n" + traceback.format_exc()}
+`;
+
+initPyodide();
+</script>
+</body>
+</html>
