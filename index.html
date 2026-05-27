@@ -321,26 +321,57 @@ function fmtSize(bytes) {
 
 // === Pyodide 초기화 ===
 async function initPyodide() {
+  const t0 = performance.now();
+  const elapsed = () => ((performance.now() - t0) / 1000).toFixed(1) + 's';
+
   try {
-    setStatus('Pyodide 런타임 로드 중...', 'working');
+    setStatus('[' + elapsed() + '] Pyodide 런타임 다운로드 중... (약 10MB)', 'working');
     pyodide = await loadPyodide({
-      indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/'
+      indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/',
+      stdout: (msg) => appendStatus('  py> ' + msg),
+      stderr: (msg) => appendStatus('  py! ' + msg, 'warn')
     });
+    appendStatus('[' + elapsed() + '] 런타임 로드 완료', 'success');
 
-    appendStatus('필요 패키지 설치 중: pandas, openpyxl, lxml, html5lib, beautifulsoup4...');
-    await pyodide.loadPackage(['pandas', 'openpyxl', 'lxml', 'html5lib', 'beautifulsoup4', 'micropip']);
+    appendStatus('[' + elapsed() + '] pandas / lxml / micropip 로드 중... (약 15~30초)');
+    await pyodide.loadPackage(['pandas', 'lxml', 'micropip']);
+    appendStatus('[' + elapsed() + '] 핵심 패키지 로드 완료', 'success');
 
-    appendStatus('Python 스크립트 로딩...');
+    appendStatus('[' + elapsed() + '] openpyxl, beautifulsoup4, html5lib 설치 중... (PyPI에서 받음, 약 10~20초)');
+    await pyodide.runPythonAsync(`
+import micropip
+await micropip.install(['openpyxl', 'beautifulsoup4', 'html5lib'], keep_going=True)
+print('micropip install done')
+`);
+    appendStatus('[' + elapsed() + '] 추가 패키지 설치 완료', 'success');
+
+    appendStatus('[' + elapsed() + '] Python 스크립트 로딩...');
     pyodide.runPython(PYTHON_CODE);
+    appendStatus('[' + elapsed() + '] 스크립트 로딩 완료', 'success');
 
-    appendStatus('준비 완료. 파일을 선택하세요.', 'success');
+    appendStatus('[' + elapsed() + '] 준비 완료. 파일을 선택하세요.', 'success');
     status.className = 'status ready';
     dropZone.classList.remove('disabled');
     runBtn.textContent = '파일을 먼저 선택하세요';
   } catch (e) {
-    setStatus('초기화 실패: ' + e.message, 'error');
+    console.error('Init error:', e);
+    const msg = (e && e.message) ? e.message : String(e);
+    const stack = (e && e.stack) ? '\n\n' + e.stack : '';
+    setStatus('[' + elapsed() + '] 초기화 실패\n\n' + msg + stack, 'error');
+    runBtn.textContent = '초기화 실패';
   }
 }
+
+// 전역 에러도 잡기
+window.addEventListener('error', (e) => {
+  console.error('Global error:', e);
+  appendStatus('[GLOBAL ERROR] ' + e.message, 'warn');
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('Unhandled rejection:', e);
+  const msg = e.reason ? (e.reason.message || String(e.reason)) : 'unknown';
+  appendStatus('[UNHANDLED] ' + msg, 'warn');
+});
 
 // === 파일 선택 핸들러 ===
 dropZone.addEventListener('click', () => {
