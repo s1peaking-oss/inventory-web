@@ -518,15 +518,39 @@ RIGHT = Alignment(horizontal="right", vertical="center")
 LEFT = Alignment(horizontal="left", vertical="center")
 
 
-def read_source(path):
+def read_source(path, log=None):
+    """HTML 위장 .xls를 우선 시도. 진짜 .xlsx는 폴백."""
+    def _log(m):
+        if log: log(m)
+
+    # 1) HTML 시도 (lxml → html5lib 순)
+    last_html_err = None
+    for parser in ('lxml', 'html5lib'):
+        try:
+            _log(f"      HTML 파싱 시도 (engine={parser})...")
+            tables = pd.read_html(path, flavor=parser)
+            if not tables:
+                raise ValueError("HTML에서 테이블을 찾지 못함")
+            df = max(tables, key=lambda t: t.shape[0] * t.shape[1])
+            _log(f"      HTML 파싱 성공: 가장 큰 테이블 {df.shape}")
+            df.columns = df.iloc[0]
+            df = df.drop(df.index[0]).reset_index(drop=True)
+            return df
+        except Exception as e:
+            last_html_err = e
+            _log(f"      HTML 파싱 실패 ({parser}): {type(e).__name__}: {str(e)[:200]}")
+
+    # 2) 진짜 .xlsx (openpyxl) 시도
     try:
-        tables = pd.read_html(path)
-        df = max(tables, key=lambda t: t.shape[0] * t.shape[1])
-        df.columns = df.iloc[0]
-        df = df.drop(df.index[0]).reset_index(drop=True)
-    except Exception:
-        df = pd.read_excel(path)
-    return df
+        _log("      .xlsx (openpyxl) 시도...")
+        return pd.read_excel(path, engine='openpyxl')
+    except Exception as e2:
+        _log(f"      .xlsx 시도도 실패: {type(e2).__name__}: {str(e2)[:200]}")
+
+    # 둘 다 실패 → 진짜 원인(HTML 에러)을 노출
+    raise RuntimeError(
+        f"파일을 읽을 수 없습니다. HTML 파싱 에러: {last_html_err}"
+    )
 
 
 def prepare_data(df):
@@ -702,7 +726,7 @@ def build_vendor_pivot_sheet(wb, df):
 def run_processing(input_path, original_name, log):
     try:
         log(f"[1/5] 파일 읽는 중: {original_name}")
-        df = read_source(input_path)
+        df = read_source(input_path, log=log)
         log(f"      원본 행 수: {len(df):,}")
 
         log("[2/5] 전처리 (외주발송/상품권 제거, 금액 계산)...")
